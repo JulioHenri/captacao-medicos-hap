@@ -11,7 +11,7 @@ DATABASE = "BASE_CAPTACAO_backup1"
 @st.cache_data
 def carregar_dados():
     engine = create_engine(
-    "mssql+pyodbc://@206.43.254.115/BASE_CAPTACAO_backup1?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server"
+    "mssql+pyodbc://@192.168.1.18/BASE_CAPTACAO_backup1?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server"
 )
 
     
