@@ -9,16 +9,35 @@ DATABASE = "BASE_CAPTACAO_backup1"
 # Função para conectar e carregar dados do SQL Server
 @st.cache_data
 def carregar_dados():
-    # Conexão com SQL Server via trusted_connection
     engine = create_engine(f"mssql+pyodbc://@{HOST}/{DATABASE}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server")
     
-    # Query consolidando informações da tabela principal
-    query = """
-    SELECT *
+    # Query para carregar dados da tabela principal
+    query_medicos = """
+    SELECT NOME, CRM, UF, ESPECIALIDADES, TEM_TELEFONE, TEM_DADOS_REDES, TEM_RQE,
+           INSTAGRAM, FACEBOOK, LINKEDIN, TWITTER, SITE
     FROM dbo.TB_BASE_CAPTACAO_MEDICA
     """
-    df = pd.read_sql(query, engine)
-    return df
+    df_medicos = pd.read_sql(query_medicos, engine)
+    
+    # Query para carregar dados adicionais (telefones e emails)
+    query_enriquecimento = """
+    SELECT CRM, 
+           FIX_1_DDD, FIX_1_NUMERO, FIX_2_DDD, FIX_2_NUMERO, FIX_3_DDD, FIX_3_NUMERO, FIX_4_DDD, FIX_4_NUMERO,
+           CEL_1_DDD, CEL_1_NUMERO, CEL_2_DDD, CEL_2_NUMERO, CEL_3_DDD, CEL_3_NUMERO, CEL_4_DDD, CEL_4_NUMERO,
+           EMAIL_1, EMAIL_2, EMAIL_3
+    FROM dbo.RETORNO_ENRIQUECIMENTO
+    """
+    df_enriquecimento = pd.read_sql(query_enriquecimento, engine)
+    
+    # Combinar dados das duas tabelas
+    return pd.merge(df_medicos, df_enriquecimento, on="CRM", how="left")
+
+# Inserir informações adicionais no banco
+def inserir_informacoes(crm, informacao):
+    engine = create_engine(f"mssql+pyodbc://@{HOST}/{DATABASE}?trusted_connection=yes&driver=ODBC+Driver+17+for+SQL+Server")
+    with engine.connect() as conn:
+        conn.execute(f"INSERT INTO dbo.INFORMACOES_ADICIONAIS (CRM, INFORMACAO) VALUES ('{crm}', '{informacao}')")
+    st.success("Informação adicional salva com sucesso!")
 
 # Função de Login
 def fazer_login():
@@ -28,7 +47,6 @@ def fazer_login():
     
     if st.button("Entrar"):
         if usuario == "timecaptacao" and senha == "senha123":
-            # Definir sessão logada
             st.session_state["logado"] = True
             st.success("Login realizado com sucesso!")
         else:
@@ -45,35 +63,15 @@ def tela_filtros():
     # Filtros interativos
     with st.expander("Nome do Médico"):
         nome_filtro = st.text_input("Digite o nome do médico:")
-    with st.expander("Área de Atuação"):
-        area_filtro = st.selectbox("Selecione a área de atuação:", [""] + list(df["ESPECIALIDADES"].dropna().unique()))
-    with st.expander("Município"):
-        municipio_filtro = st.text_input("Digite a cidade:")
     with st.expander("CRM"):
         crm_filtro = st.text_input("Digite o CRM:")
-    with st.expander("UF"):
-        uf_filtro = st.selectbox("Selecione a UF:", [""] + list(df["UF"].dropna().unique()))
-    with st.expander("Tempo de Carreira"):
-        tempo_filtro = st.selectbox("Selecione o tempo de carreira:", [""] + list(df["FX_TEMPO_DE_CARREIRA"].dropna().unique()))
-    with st.expander("Telemedicina"):
-        telemedicina_filtro = st.selectbox("Atua com telemedicina?", ["", "Sim", "Não"])
 
     # Aplicar filtros
     resultado = df.copy()
     if nome_filtro:
         resultado = resultado[resultado["NOME"].str.contains(nome_filtro, case=False, na=False)]
-    if area_filtro:
-        resultado = resultado[resultado["ESPECIALIDADES"] == area_filtro]
-    if municipio_filtro:
-        resultado = resultado[resultado["CIDADE"].str.contains(municipio_filtro, case=False, na=False)]
     if crm_filtro:
         resultado = resultado[resultado["CRM"].str.contains(crm_filtro, case=False, na=False)]
-    if uf_filtro:
-        resultado = resultado[resultado["UF"] == uf_filtro]
-    if tempo_filtro:
-        resultado = resultado[resultado["FX_TEMPO_DE_CARREIRA"] == tempo_filtro]
-    if telemedicina_filtro:
-        resultado = resultado[resultado["ATUA_COM_TELEMEDICINA"] == telemedicina_filtro]
 
     # Exibir resultados em formato de cards
     st.subheader("Resultados da Busca")
@@ -82,20 +80,33 @@ def tela_filtros():
     if len(resultado) == 0:
         st.info("Nenhum registro encontrado. Ajuste os filtros e tente novamente.")
     else:
-        # Limitar a exibição a 10 registros por vez
-        for i, row in resultado.head(10).iterrows():
-            st.markdown(f"""
-                <div style="border:1px solid #ccc; padding:10px; border-radius:10px; margin-bottom:10px; background-color:#f9f9f9;">
-                    <strong>Nome:</strong> {row['NOME']}<br>
-                    <strong>CRM:</strong> {row['CRM']}<br>
-                    <strong>UF:</strong> {row['UF']}<br>
-                    <strong>Especialidade:</strong> {row['ESPECIALIDADES']}<br>
-                    <strong>Município:</strong> {row['CIDADE']}<br>
-                    <strong>Telemedicina:</strong> {row['ATUA_COM_TELEMEDICINA']}<br>
-                    <strong>Tempo de Carreira:</strong> {row['FX_TEMPO_DE_CARREIRA']}
-                </div>
-            """, unsafe_allow_html=True)
-        st.caption("Exibindo até 10 registros. Use os filtros para refinar os resultados.")
+        for _, row in resultado.iterrows():
+            with st.expander(f"🔍 {row['NOME']} ({row['CRM']})"):
+                st.markdown(f"""
+                **UF:** {row['UF']}  
+                **Especialidade:** {row['ESPECIALIDADES']}  
+                **Possui Telefone:** {row['TEM_TELEFONE']}  
+                **Possui Dados de Redes:** {row['TEM_DADOS_REDES']}  
+                **Possui RQE:** {row['TEM_RQE']}  
+                **Redes Sociais:** {row['INSTAGRAM']} / {row['FACEBOOK']} / {row['LINKEDIN']} / {row['TWITTER']} / {row['SITE']}  
+                """)
+
+                st.write("### Telefones")
+                for i in range(1, 5):
+                    if pd.notna(row[f"FIX_{i}_DDD"]) and pd.notna(row[f"FIX_{i}_NUMERO"]):
+                        st.write(f"📞 Fixo: ({row[f'FIX_{i}_DDD']}) {row[f'FIX_{i}_NUMERO']}")
+                    if pd.notna(row[f"CEL_{i}_DDD"]) and pd.notna(row[f"CEL_{i}_NUMERO"]):
+                        st.write(f"📱 Celular: ({row[f'CEL_{i}_DDD']}) {row[f'CEL_{i}_NUMERO']}")
+                
+                st.write("### Emails")
+                for i in range(1, 4):
+                    if pd.notna(row[f"EMAIL_{i}"]):
+                        st.write(f"✉️ {row[f'EMAIL_{i}']}")
+
+                st.write("### Inserir Informações Adicionais")
+                informacao = st.text_area("Insira a nova informação:")
+                if st.button("Salvar Informação", key=f"save_{row['CRM']}"):
+                    inserir_informacoes(row["CRM"], informacao)
 
 # Gerenciamento de Sessão
 if "logado" not in st.session_state:
